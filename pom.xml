@@ -22,7 +22,7 @@
         <dependency>
             <groupId>gov.nasa.gsfc.heasarc</groupId>
             <artifactId>nom-tam-fits</artifactId>
-            <version>1.15.2</version>
+            <version>1.17.1-SNAPSHOT</version>
             <type>jar</type>
         </dependency>
         <dependency>
@@ -52,6 +52,12 @@
             <groupId>${project.groupId}</groupId>
             <artifactId>org-lsst-ccs-image-utilities</artifactId>
             <version>3.1.10</version>
+        </dependency>
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.4.6</version>
+            <classifier>all</classifier>
         </dependency>
     </dependencies>
     <description>FITS image reader for use with cantaloupe.</description>

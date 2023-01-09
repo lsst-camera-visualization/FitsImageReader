@@ -10,7 +10,6 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBuffer;
 import java.awt.image.LookupOp;
 import java.awt.image.WritableRaster;
-import java.io.File;
 import java.io.IOException;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
@@ -35,11 +34,12 @@ import javax.imageio.stream.ImageInputStream;
 import nom.tam.fits.FitsException;
 import nom.tam.fits.Header;
 import nom.tam.fits.TruncatedFileException;
-import nom.tam.util.BufferedFile;
+import nom.tam.util.FitsFile;
 import org.lsst.fits.imageio.bias.BiasCorrection;
 import org.lsst.fits.imageio.bias.BiasCorrection.CorrectionFactors;
 import org.lsst.fits.imageio.bias.NullBiasCorrection;
 import org.lsst.fits.imageio.cmap.RGBColorMap;
+import org.lsst.fits.imageio.s3.S3Utils;
 
 /**
  * This is the main component of the camera image reader. It makes extensive use
@@ -341,10 +341,10 @@ public class CachingReader {
         if (line.startsWith("DAQ:")) {
             return readDAQSegment(line, wcsLetter, wcsOverride);
         } else {
-            return readFitsFileSegment(new File(line), wcsLetter, wcsOverride);
+            return readFitsFileSegment(line, wcsLetter, wcsOverride);
         }
     }
-
+    // TODO: Complete implementation
     private static List<Segment> readDAQSegment(String line, char wcsLetter, Map<String, Map<String, Object>> wcsOverride) throws IOException {
         // We can't read one segment from the DAQ, rather we have to read the raw data for an entire REB, and then extract the segments from that.
         // DAQ:camera:raw/MC_C_20210206_000109:R00/RebG
@@ -364,15 +364,15 @@ public class CachingReader {
         }
     }
 
-    private static List<Segment> readFitsFileSegment(File file, char wcsLetter, Map<String, Map<String, Object>> wcsOverride) throws IOException, TruncatedFileException, FitsException {
+    private static List<Segment> readFitsFileSegment(String file, char wcsLetter, Map<String, Map<String, Object>> wcsOverride) throws IOException, TruncatedFileException, FitsException {
         List<Segment> result = new ArrayList<>();
         String ccdSlot = null;
         String raftBay = null;
         int nSegments = 16;
         boolean isDMFile = false;
-        try ( BufferedFile bf = new BufferedFile(file, "r")) {
+        try ( FitsFile ff = S3Utils.openFile(file)) {
             for (int i = 0; i < nSegments + 1; i++) {
-                Header header = new Header(bf);
+                Header header = new Header(ff);
                 if (i == 0) {
                     raftBay = header.getStringValue("RAFTBAY");
                     ccdSlot = header.getStringValue("CCDSLOT");
@@ -412,12 +412,12 @@ public class CachingReader {
                         dmWCSOverride.put("PC2_2D", 1.0);
                         dmWCSOverride.put("CRVAL1D", 0);
                         dmWCSOverride.put("CRVAL2D", 0);
-                        Segment segment = new Segment(header, file, bf, raftBay, ccdSlot, wcsLetter, dmWCSOverride);
+                        Segment segment = new Segment(header, file, ff, raftBay, ccdSlot, wcsLetter, dmWCSOverride);
                         result.add(segment);
                     } else {
                         String extName = header.getStringValue("EXTNAME");
                         String wcsKey = String.format("%s/%s/%s", raftBay, ccdSlot, extName.substring(7, 9));
-                        Segment segment = new Segment(header, file, bf, raftBay, ccdSlot, wcsLetter, wcsOverride == null ? null : wcsOverride.get(wcsKey));
+                        Segment segment = new Segment(header, file, ff, raftBay, ccdSlot, wcsLetter, wcsOverride == null ? null : wcsOverride.get(wcsKey));
                         result.add(segment);
                     }
                 }

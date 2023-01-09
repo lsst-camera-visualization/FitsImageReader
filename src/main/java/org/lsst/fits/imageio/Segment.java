@@ -5,15 +5,10 @@ import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.nio.channels.AsynchronousFileChannel;
-import java.nio.channels.CompletionHandler;
-import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -28,7 +23,8 @@ import nom.tam.fits.compression.algorithm.gzip2.GZip2Compressor;
 import nom.tam.fits.compression.algorithm.rice.RiceCompressOption;
 import nom.tam.fits.compression.algorithm.rice.RiceCompressor.IntRiceCompressor;
 import nom.tam.fits.header.Standard;
-import nom.tam.util.BufferedFile;
+import nom.tam.util.FitsFile;
+import org.lsst.fits.imageio.s3.S3Utils;
 
 /**
  * Represents one segment (amplifier) of a FITS file
@@ -39,7 +35,7 @@ public class Segment {
 
     private static final Pattern DATASET_PATTERN = Pattern.compile("\\[(\\d+):(\\d+),(\\d+):(\\d+)\\]");
 
-    private final File file;
+    private final String file;
     private final long seekPosition;
     private final Rectangle2D.Double wcs;
     private final AffineTransform wcsTranslation;
@@ -59,7 +55,6 @@ public class Segment {
 //    private final int ccdX;
 //    private final int ccdY;
     private int channel;
-//    private BufferedFile bf;
     // Used only with compressed data
     private final int cAxis1;
     private final int cAxis2;
@@ -70,10 +65,24 @@ public class Segment {
     private final String ccdSlot;
     private final String compressionType;
     private final int bitpix;
+    
+    /**
+     * Creates a segment. 
+     * DANGER: This constructor modifies ff to forward the position to the next header.
+     * @param header
+     * @param file
+     * @param ff
+     * @param raftBay
+     * @param ccdSlot
+     * @param wcsLetter
+     * @param wcsOverride
+     * @throws IOException
+     * @throws FitsException 
+     */
 
-    public Segment(Header header, File file, BufferedFile bf, String raftBay, String ccdSlot, char wcsLetter, Map<String, Object> wcsOverride) throws IOException, FitsException {
+    public Segment(Header header, String file, FitsFile ff, String raftBay, String ccdSlot, char wcsLetter, Map<String, Object> wcsOverride) throws IOException, FitsException {
         this.file = file;
-        this.seekPosition = bf.getFilePointer();
+        this.seekPosition = ff.getFilePointer();
         this.wcsLetter = wcsLetter;
         this.raftBay = raftBay;
         this.ccdSlot = ccdSlot;
@@ -109,7 +118,7 @@ public class Segment {
         }
         // Skip the data (for now)
         int pad = FitsUtil.padding(rawDataLength);
-        bf.skip(rawDataLength + pad);
+        ff.skip(rawDataLength + pad);
 
         if (wcsOverride != null) {
             String datasecString = wcsOverride.get("DATASEC").toString();
@@ -172,10 +181,6 @@ public class Segment {
 
     public int getDataSize() {
         return rawDataLength;
-    }
-
-    public File getFile() {
-        return file;
     }
 
 //    // Data in the compressed byte array is stored with the bytes shuffled, this routine unshuffles them
@@ -290,12 +295,13 @@ public class Segment {
         if (isCompressed) {
             if ("GZIP_2".equals(compressionType)) {
                 switch (bitpix) {
-                    case 32:
+                    case 32 -> {
                         return futureByteBuffer.thenApply((bb) -> decodeGZIP2CompressedData(bb)).thenApply((ib) -> new RawData(this, ib));
-                    case -32:
+                    }
+                    case -32 -> {
                         return futureByteBuffer.thenApply((bb) -> decodeGZIP2FloatCompressedData(bb)).thenApply((fb) -> new RawData(this, fb));
-                    default:
-                        throw new RuntimeException("Unsupported bitpix: "+bitpix);
+                    }
+                    default -> throw new RuntimeException("Unsupported bitpix: "+bitpix);
                 }
             } else {
                 return futureByteBuffer.thenApply((bb) -> decodeRICECompressedData(bb)).thenApply((ib) -> new RawData(this, ib));
@@ -306,37 +312,7 @@ public class Segment {
     }
 
     private CompletableFuture<ByteBuffer> readByteBufferAsync() {
-        CompletableFuture<ByteBuffer> result = new CompletableFuture<>();
-        try {
-            AsynchronousFileChannel asyncChannel = AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
-            ByteBuffer bb = ByteBuffer.allocateDirect(rawDataLength);
-            bb.order(ByteOrder.BIG_ENDIAN);
-            asyncChannel.read(bb, seekPosition, result, new CompletionHandler<Integer, CompletableFuture<ByteBuffer>>() {
-                @Override
-                public void completed(Integer len, CompletableFuture<ByteBuffer> future) {
-                    try {
-                        asyncChannel.close();
-                    } catch (IOException ex) {
-                        future.completeExceptionally(ex);
-                    }
-                    bb.flip();
-                    future.complete(bb);
-                }
-
-                @Override
-                public void failed(Throwable x, CompletableFuture<ByteBuffer> future) {
-                    try {
-                        asyncChannel.close();
-                    } catch (IOException ex) {
-                        // We already have an IO exception in progress, so ignore this additional one
-                    }
-                    future.completeExceptionally(x);
-                }
-            });
-        } catch (IOException x) {
-            result.completeExceptionally(x);
-        }
-        return result;
+        return S3Utils.readByteBufferAsync(file, seekPosition, rawDataLength);
     }
 
     public int getNAxis1() {
