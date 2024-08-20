@@ -81,7 +81,7 @@ public class CachingReader {
     public CachingReader() {
 
         segmentCache = Caffeine.newBuilder()
-                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.segmentCacheSize", 10_000))
+                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.segmentCacheSize", 10))
                 .recordStats()
                 .buildAsync((SegmentCacheKey key) -> {
                     return Timed.execute(() -> {
@@ -92,12 +92,12 @@ public class CachingReader {
         Weigher<Segment, RawData> rawDataWeigher = (Segment k1, RawData rawData) -> rawData.getBuffer().capacity() * 4;
         rawDataCache = Caffeine.newBuilder()
                 .weigher(rawDataWeigher)
-                .maximumWeight(Long.getLong("org.lsst.fits.imageio.rawDataCacheSizeBytes", 1_000_000_000L))
+                .maximumWeight(Long.getLong("org.lsst.fits.imageio.rawDataCacheSizeBytes", 1_000_000L))
                 .recordStats()
                 .buildAsync((Segment segment, Executor executor) -> segment.readRawDataAsync(executor));
 
         biasCorrectionCache = Caffeine.newBuilder()
-                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.biasCorrectionCacheSize", 10_000))
+                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.biasCorrectionCacheSize", 10))
                 .recordStats()
                 .buildAsync((SegmentAndBiasCorrection key, Executor executor) -> {
                     Segment segment = key.segment;
@@ -113,7 +113,7 @@ public class CachingReader {
         Weigher<SegmentBiasCorrectionAndCounts, BufferedImage> buffedImageWeigher = (SegmentBiasCorrectionAndCounts k1, BufferedImage bi) -> bi.getHeight() * bi.getWidth() * 4;
         bufferedImageCache = Caffeine.newBuilder()
                 .weigher(buffedImageWeigher)
-                .maximumWeight(Long.getLong("org.lsst.fits.imageio.bufferedImageCacheSizeBytes", 5_000_000_000L))
+                .maximumWeight(Long.getLong("org.lsst.fits.imageio.bufferedImageCacheSizeBytes", 1_000_000L))
                 .recordStats()
                 .buildAsync((SegmentBiasCorrectionAndCounts key, Executor executor) -> {
                     return rawDataCache.get(key.segment).thenApply(rawData -> {
@@ -130,7 +130,7 @@ public class CachingReader {
                 });
 
         globalScalingCache = Caffeine.newBuilder()
-                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.globalScalingCacheSize", 10_000))
+                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.globalScalingCacheSize", 10))
                 .recordStats()
                 .buildAsync((SegmentListAndBiasCorrection key, Executor executor) -> {
                     LOG.log(Level.FINE, "Building global scale for {0} {1} {2}", new Object[]{key.hashCode(), key.segments.hashCode(), key.biasCorrection.hashCode()});
@@ -162,7 +162,7 @@ public class CachingReader {
                 });
 
         linesCache = Caffeine.newBuilder()
-                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.linesCacheSize", 10_000))
+                .maximumSize(Integer.getInteger("org.lsst.fits.imageio.linesCacheSize", 10))
                 .build((ImageInputStream in) -> {
                     return Timed.execute(() -> {
                         List<String> lines = new ArrayList<>();
@@ -192,6 +192,7 @@ public class CachingReader {
 
     void report() {
         LoadingCache<SegmentCacheKey, List<Segment>> s1 = segmentCache.synchronous();
+        LOG.log(Level.INFO, "Skipping color map 2");
         LOG.log(Level.INFO, "segment Cache size {0} stats {1}", new Object[]{s1.estimatedSize(), s1.stats()});
         LoadingCache<Segment, RawData> s2 = rawDataCache.synchronous();
         LOG.log(Level.INFO, "rawData Cache size {0} stats {1}", new Object[]{s2.estimatedSize(), s2.stats()});
@@ -491,6 +492,7 @@ public class CachingReader {
     }
 
     private static void copyAndScaleData(Rectangle datasec, Segment segment, int[] cdf, IntBuffer intBuffer, BiasCorrection.CorrectionFactors factors, DataBuffer db, int max) {
+        LOG.log(Level.WARNING, "copyAndScaleData called");
         for (int y = datasec.y; y < datasec.height + datasec.y; y++) {
             int p = datasec.x + y * segment.getNAxis1();
             for (int x = datasec.x; x < datasec.width + datasec.x; x++) {
@@ -502,7 +504,9 @@ public class CachingReader {
 //                if (bin > max) {
 //                    LOG.log(Level.WARNING, "Bin greater than max {0} {1} {2} {3} {4}", new Object[]{segment, x, y, bin, max});                    
 //                }
-                int rgb = cdf[bin];
+                //int rgb = cdf[bin]; // default color map lookup of bin content -> rgb encoding
+                // test:  just shift it up. Hardwired to 18 bits, so shift up 6 bits into RGB fields.
+                int rgb = bin << 6;
                 db.setElem(p, rgb);
                 p++;
             }
