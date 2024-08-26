@@ -62,7 +62,7 @@ public class CachingReader {
 
     // Note: Using a long array as a hash key is probably a bad idea, since presambly it requires scanning all the 
     // values to compute the hash.
-    private record SegmentBiasCorrectionAndCounts(Segment segment, BiasCorrection biasCorrection, long[] counts) {}
+    private record SegmentBiasCorrectionAndCounts(Segment segment, BiasCorrection biasCorrection, long[] counts, RGBColorMap cmap) {}
     private final AsyncLoadingCache<SegmentBiasCorrectionAndCounts, BufferedImage> bufferedImageCache;
 
     private record SegmentListAndBiasCorrection(List<Segment> segments, BiasCorrection biasCorrection) {}
@@ -120,7 +120,7 @@ public class CachingReader {
                         return biasCorrectionCache.get(new SegmentAndBiasCorrection(key.segment, key.biasCorrection)).thenApply(factors -> {
                             return Timed.execute(() -> {
                                 if (rawData.getBuffer() instanceof IntBuffer) {
-                                    return createBufferedImage((RawData<IntBuffer>) rawData, factors, key.counts);
+                                    return createBufferedImage((RawData<IntBuffer>) rawData, factors, key.counts, key.cmap);
                                 } else {
                                     return createBufferedImage((RawData<FloatBuffer>) rawData);
                                 }
@@ -192,7 +192,7 @@ public class CachingReader {
 
     void report() {
         LoadingCache<SegmentCacheKey, List<Segment>> s1 = segmentCache.synchronous();
-        LOG.log(Level.INFO, "Skipping color map 2");
+        //LOG.log(Level.INFO, "Skipping color map 2");
         LOG.log(Level.INFO, "segment Cache size {0} stats {1}", new Object[]{s1.estimatedSize(), s1.stats()});
         LoadingCache<Segment, RawData> s2 = rawDataCache.synchronous();
         LOG.log(Level.INFO, "rawData Cache size {0} stats {1}", new Object[]{s2.estimatedSize(), s2.stats()});
@@ -218,7 +218,7 @@ public class CachingReader {
                 segmentsCompletables.add(futureSegments.thenAccept((List<Segment> segments) -> {
                     List<Segment> segmentsToRead = computeSegmentsToRead(segments, sourceRegion);
                     segmentsToRead.stream().forEach((Segment segment) -> {
-                        CompletableFuture<BufferedImage> fbi = bufferedImageCache.get(new SegmentBiasCorrectionAndCounts(segment, bc, globalScale));
+                        CompletableFuture<BufferedImage> fbi = bufferedImageCache.get(new SegmentBiasCorrectionAndCounts(segment, bc, globalScale, cmap));
                         bufferedImageCompletables.add(fbi.thenAccept((BufferedImage bi) -> {
                             Timed.execute(() -> {
                                 // g2=g is the graphics we are writing into
@@ -231,7 +231,7 @@ public class CachingReader {
                                     Rectangle datasec = segment.getDataSec();
                                     subimage = bi.getSubimage(datasec.x, datasec.y, datasec.width, datasec.height);
                                 }
-                                if (cmap != CameraImageReader.DEFAULT_COLOR_MAP) {
+                                if (cmap != CameraImageReader.DEFAULT_COLOR_MAP && cmap != CameraImageReader.NULL_COLOR_MAP) {
                                     LookupOp op = cmap.getLookupOp();
                                     subimage = op.filter(subimage, null);
                                 }
@@ -277,7 +277,7 @@ public class CachingReader {
             globalScaleCompletable.add(globalScalingCache.get(new SegmentListAndBiasCorrection(allSegments, bc)).thenAccept((long[] globalScale) -> {
                 List<Segment> segmentsToRead = computeSegmentsToRead(allSegments, sourceRegion);
                 segmentsToRead.stream().forEach((Segment segment) -> {
-                    CompletableFuture<BufferedImage> fbi = bufferedImageCache.get(new SegmentBiasCorrectionAndCounts(segment, bc, globalScale));
+                    CompletableFuture<BufferedImage> fbi = bufferedImageCache.get(new SegmentBiasCorrectionAndCounts(segment, bc, globalScale, cmap));
                     bufferedImageCompletables.add(fbi.thenAccept((BufferedImage bi) -> {
                         Timed.execute(() -> {
                             // g2=g is the graphics we are writing into
@@ -290,7 +290,7 @@ public class CachingReader {
                                 Rectangle datasec = segment.getDataSec();
                                 subimage = bi.getSubimage(datasec.x, datasec.y, datasec.width, datasec.height);
                             }
-                            if (cmap != CameraImageReader.DEFAULT_COLOR_MAP) {
+                            if (cmap != CameraImageReader.DEFAULT_COLOR_MAP && cmap != CameraImageReader.NULL_COLOR_MAP) {
                                 LookupOp op = cmap.getLookupOp();
                                 subimage = op.filter(subimage, null);
                             }
@@ -454,7 +454,7 @@ public class CachingReader {
         return image;
     }
 
-    private static BufferedImage createBufferedImage(RawData<IntBuffer> rawData, CorrectionFactors factors, long[] globalScale) {
+    private static BufferedImage createBufferedImage(RawData<IntBuffer> rawData, CorrectionFactors factors, long[] globalScale, RGBColorMap cmap) {
         IntBuffer intBuffer = rawData.getBuffer();
         Segment segment = rawData.getSegment();
         Rectangle datasec = segment.getDataSec();
@@ -487,12 +487,16 @@ public class CachingReader {
 //        graphics.fillRect(datasec.x + datasec.width, 0, segment.getNAxis1() - datasec.x - datasec.width, segment.getNAxis2());
 //        graphics.setColor(Color.BLUE);
 //        graphics.fillRect(datasec.x, datasec.y + datasec.height, datasec.width, segment.getNAxis2());
-        copyAndScaleData(datasec, segment, cdf, intBuffer, factors, db, max);
+        copyAndScaleData(datasec, segment, cdf, intBuffer, factors, db, max, cmap);
         return image;
     }
 
-    private static void copyAndScaleData(Rectangle datasec, Segment segment, int[] cdf, IntBuffer intBuffer, BiasCorrection.CorrectionFactors factors, DataBuffer db, int max) {
-        LOG.log(Level.WARNING, "copyAndScaleData called");
+    private static void copyAndScaleData(Rectangle datasec, Segment segment, int[] cdf, IntBuffer intBuffer, BiasCorrection.CorrectionFactors factors, DataBuffer db, int max, RGBColorMap cmap) {
+        //LOG.log(Level.WARNING, "copyAndScaleData called 1.7.1");
+        //if (cmap.equals(CameraImageReader.NULL_COLOR_MAP)) LOG.log(Level.INFO, "copyAndScaleData null color map");
+        //else if (cmap.equals(CameraImageReader.DEFAULT_COLOR_MAP)) LOG.log(Level.INFO, "copyAndScaleData default color map");
+        //else LOG.log(Level.INFO, "copyAndScaleData other color map");
+        boolean no_map = cmap.equals(CameraImageReader.NULL_COLOR_MAP);
         for (int y = datasec.y; y < datasec.height + datasec.y; y++) {
             int p = datasec.x + y * segment.getNAxis1();
             for (int x = datasec.x; x < datasec.width + datasec.x; x++) {
@@ -504,9 +508,7 @@ public class CachingReader {
 //                if (bin > max) {
 //                    LOG.log(Level.WARNING, "Bin greater than max {0} {1} {2} {3} {4}", new Object[]{segment, x, y, bin, max});                    
 //                }
-                //int rgb = cdf[bin]; // default color map lookup of bin content -> rgb encoding
-                // test:  just shift it up. Hardwired to 18 bits, so shift up 6 bits into RGB fields.
-                int rgb = bin << 6;
+                int rgb = no_map ? bin << 6 : cdf[bin]; 
                 db.setElem(p, rgb);
                 p++;
             }
@@ -548,8 +550,8 @@ public class CachingReader {
         return rawDataCache.get(segment).join();
     }
 
-    BufferedImage getBufferedImage(Segment segment, BiasCorrection bc, long[] globalScale) {
-        final SegmentBiasCorrectionAndCounts key = new SegmentBiasCorrectionAndCounts(segment, bc, globalScale);
+    BufferedImage getBufferedImage(Segment segment, BiasCorrection bc, long[] globalScale, RGBColorMap cmap) {
+        final SegmentBiasCorrectionAndCounts key = new SegmentBiasCorrectionAndCounts(segment, bc, globalScale, cmap);
         CompletableFuture<BufferedImage> fi = bufferedImageCache.get(key);
         return fi.join();
     }

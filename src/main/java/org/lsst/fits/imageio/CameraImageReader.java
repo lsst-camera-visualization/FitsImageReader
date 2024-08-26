@@ -41,6 +41,7 @@ public class CameraImageReader extends ImageReader {
     private static final CachingReader READER = new CachingReader();
     public static final ImageTypeSpecifier IMAGE_TYPE = ImageTypeSpecifier.createFromBufferedImageType(BufferedImage.TYPE_INT_RGB);
     public static final RGBColorMap DEFAULT_COLOR_MAP = new SAOColorMap(256, "grey.sao");
+    public static final RGBColorMap NULL_COLOR_MAP = new SAOColorMap(256, "null.sao");
     public static final BiasCorrection DEFAULT_BIAS_CORRECTION = new NullBiasCorrection();
     private static final int IMAGE_OFFSET = 100;
     private char wcsString;
@@ -175,11 +176,13 @@ public class CameraImageReader extends ImageReader {
         Rectangle sourceRegion = param == null ? null : param.getSourceRegion();
         long[] globalScale;
         if (param instanceof CameraImageReadParam cameraParam) {
+            //LOG.log(Level.INFO, "CameraImageReadParam colorMap = {0}", cameraParam.getColorMapName());
             cmap = cameraParam.getColorMap();
             bc = cameraParam.getBiasCorrection();
             globalScale = cameraParam.getGlobalScale();
             wcsOverride = cameraParam.getWCSOverride();
         } else {
+            //LOG.log(Level.INFO, "CameraImageReadParam use defaults");
             cmap = DEFAULT_COLOR_MAP;
             bc = DEFAULT_BIAS_CORRECTION;
             globalScale = null;
@@ -233,10 +236,10 @@ public class CameraImageReader extends ImageReader {
     public int getRGBForSegment(Segment segment, int x, int y) {
         if (scale == CameraImageReadParam.Scale.GLOBAL) {
             long[] globalScale = READER.getGlobalScale((ImageInputStream) getInput(), biasCorrection, wcsString, null);
-            BufferedImage image = READER.getBufferedImage(segment, biasCorrection, globalScale);
+            BufferedImage image = READER.getBufferedImage(segment, biasCorrection, globalScale, CameraImageReader.DEFAULT_COLOR_MAP);
             return image.getRGB(x + segment.getDataSec().x, y + segment.getDataSec().y);
         } else {
-            BufferedImage image = READER.getBufferedImage(segment, biasCorrection, null);
+            BufferedImage image = READER.getBufferedImage(segment, biasCorrection, null, CameraImageReader.DEFAULT_COLOR_MAP);
             return image.getRGB(x + segment.getDataSec().x, y + segment.getDataSec().y);
         }
     }

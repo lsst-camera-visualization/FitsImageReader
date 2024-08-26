@@ -50,6 +50,7 @@ public class CameraImageReadParam extends ImageReadParam {
         colorMapOptions.put("cubehelix1", new SAOColorMap(256, "cubehelix1.sao"));
         colorMapOptions.put("rainbow", new SAOColorMap(256, "rainbow.sao"));
         colorMapOptions.put("standard", new SAOColorMap(256, "standard.sao"));
+        colorMapOptions.put("null", new SAOColorMap(256, "null.sao"));
         colorMap = new GetSetAvailable<>(CameraImageReader.DEFAULT_COLOR_MAP, "Color Map", colorMapOptions);
     }
 

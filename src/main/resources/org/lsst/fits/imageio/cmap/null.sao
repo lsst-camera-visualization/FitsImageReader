@@ -1,0 +1,8 @@
+# SAOimage color table (needs to be different from the others to avoid equals())
+PSEUDOCOLOR
+RED:
+(0,0)(0.5,1)(1,1)
+GREEN:
+(0,0)(0.5,1)(1,1)
+BLUE:
+(0,0)(0.5,1)(1,1)
