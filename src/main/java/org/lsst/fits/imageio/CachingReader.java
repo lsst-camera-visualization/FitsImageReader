@@ -102,10 +102,16 @@ public class CachingReader {
                 .buildAsync((SegmentAndBiasCorrection key, Executor executor) -> {
                     Segment segment = key.segment;
                     return rawDataCache.get(segment).thenApply(rawData -> {
-                        if (rawData.getBuffer() instanceof IntBuffer intBuffer) {
-                            return key.biasCorrection.compute(intBuffer, segment);
-                        } else {
-                            return new NullBiasCorrection().compute(null, segment);
+                        try {
+                            if (rawData.getBuffer() instanceof IntBuffer intBuffer) {
+                                return key.biasCorrection.compute(intBuffer, segment);
+                            } else {
+                                return new NullBiasCorrection().compute(null, segment);
+                            }
+                        } catch (Throwable t) {
+                            LOG.log(Level.SEVERE, "Error loading bias correction buffer limit:{0} position:{1} datasec:{2}", 
+                                    new Object[]{rawData.getBuffer().limit(), rawData.getBuffer().position(), segment.getDataSec()});
+                            throw t;
                         }
                     });
                 });
@@ -370,6 +376,7 @@ public class CachingReader {
         String raftBay = null;
         int nSegments = 16;
         boolean isDMFile = false;
+        long fileSize = file.length();
         try ( BufferedFile bf = new BufferedFile(file, "r")) {
             for (int i = 0; i < nSegments + 1; i++) {
                 Header header = new Header(bf);
@@ -410,19 +417,22 @@ public class CachingReader {
                             naxis1 = header.getIntValue("NAXIS1");
                             naxis2 = header.getIntValue("NAXIS2");
                         }
+                        int ccdx = ccdSlot.charAt(1) - '0';
+                        int ccdy = ccdSlot.charAt(2) - '0';
                         dmWCSOverride.put("DATASEC", String.format("[1:%d,1:%d]", naxis1, naxis2));
                         dmWCSOverride.put("PC1_1D", 1.0);
                         dmWCSOverride.put("PC1_2D", 0.0);
                         dmWCSOverride.put("PC2_1D", 0.0);
                         dmWCSOverride.put("PC2_2D", 1.0);
-                        dmWCSOverride.put("CRVAL1D", 0);
-                        dmWCSOverride.put("CRVAL2D", 0);
-                        Segment segment = new Segment(header, file, bf, raftBay, ccdSlot, wcsLetter, dmWCSOverride);
+                        dmWCSOverride.put("CRVAL1D", 100 + ccdy * (naxis1 + 150));
+                        dmWCSOverride.put("CRVAL2D", 100 + ccdx * (naxis2 + 200));
+                        LOG.log(Level.INFO, "dmWCSOverride:{0}", dmWCSOverride);
+                        Segment segment = new Segment(header, i, fileSize, file, bf, raftBay, ccdSlot, wcsLetter, dmWCSOverride);
                         result.add(segment);
                     } else {
                         String extName = header.getStringValue("EXTNAME");
                         String wcsKey = String.format("%s/%s/%s", raftBay, ccdSlot, extName.substring(7, 9));
-                        Segment segment = new Segment(header, file, bf, raftBay, ccdSlot, wcsLetter, wcsOverride == null ? null : wcsOverride.get(wcsKey));
+                        Segment segment = new Segment(header, i, fileSize, file, bf, raftBay, ccdSlot, wcsLetter, wcsOverride == null ? null : wcsOverride.get(wcsKey));
                         result.add(segment);
                     }
                 }
