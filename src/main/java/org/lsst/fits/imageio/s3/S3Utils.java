@@ -21,6 +21,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.logging.Logger;
 import nom.tam.util.FitsFile;
 
 /**
@@ -28,6 +29,8 @@ import nom.tam.util.FitsFile;
  * @author tonyj
  */
 public class S3Utils {
+
+    private static final Logger LOG = Logger.getLogger(S3Utils.class.getName());
 
     private final static LoadingCache<String, RandomAccessObject> raoCache = Caffeine.newBuilder()
             .expireAfterAccess(Duration.ofMinutes(1))
@@ -73,10 +76,9 @@ public class S3Utils {
 
     }
 
-    public static CompletableFuture<ByteBuffer> readByteBufferAsync(String file, long seekPosition, int rawDataLength) {
+    public static CompletableFuture<ByteBuffer> readByteBufferAsync(String file, long seekPosition, int rawDataLength, long fileSize) {
         if (file.startsWith("s3:")) {
             return readByteBufferAsyncFromS3(file, seekPosition, rawDataLength);
-
         } else {
             return readByteBufferAsyncFromFile(file, seekPosition, rawDataLength);
         }
@@ -104,7 +106,7 @@ public class S3Utils {
     }
 
     private static CompletableFuture<ByteBuffer> readByteBufferAsyncFromFile(String file, long seekPosition, int rawDataLength) {
-        CompletableFuture<ByteBuffer> result = new CompletableFuture<>();
+        CompletableFuture<ByteBuffer> result = new CompletableFuture<>();       
         AsynchronousFileChannel asyncChannel = fileCache.get(file);
         ByteBuffer bb = ByteBuffer.allocateDirect(rawDataLength);
         bb.order(ByteOrder.BIG_ENDIAN);

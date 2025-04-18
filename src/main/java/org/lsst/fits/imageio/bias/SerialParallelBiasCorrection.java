@@ -82,7 +82,7 @@ public class SerialParallelBiasCorrection implements BiasCorrection {
         Header header = new Header(bf); // Skip primary header
         header = new Header(bf);
 
-        Segment segment = new Segment(header, file, bf, "R22", "S11", 'Q', null);
+        Segment segment = new Segment(header, 1, file.length(), file, bf, "R22", "S11", 'Q', null);
         IntBuffer intBuffer = (IntBuffer) segment.readRawDataAsync(null).join().getBuffer();
 
         BiasCorrection bc = new SerialParallelBiasCorrection();

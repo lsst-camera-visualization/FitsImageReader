@@ -2,8 +2,9 @@ package org.lsst.fits.imageio.wcs;
 
 import java.io.IOException;
 import java.io.InputStream;
-import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.Assert.assertNotNull;
+import org.junit.Test;
+
 
 /**
  *
