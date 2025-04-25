@@ -404,8 +404,6 @@ public class CachingReader {
                 }
                 if (i > 0) {
                     if (isDMFile) {
-                        // This is correct for a single CCD (e.g. AuxTel)
-                        // Will need more work for the general case
                         wcsLetter = 'D';
                         Map<String, Object> dmWCSOverride = new HashMap<>();
                         boolean isCompressed = header.getBooleanValue("ZIMAGE");
@@ -417,6 +415,7 @@ public class CachingReader {
                             naxis1 = header.getIntValue("NAXIS1");
                             naxis2 = header.getIntValue("NAXIS2");
                         }
+                        // This does not work for SW0 and SW1
                         int ccdx = ccdSlot.charAt(1) - '0';
                         int ccdy = ccdSlot.charAt(2) - '0';
                         dmWCSOverride.put("DATASEC", String.format("[1:%d,1:%d]", naxis1, naxis2));

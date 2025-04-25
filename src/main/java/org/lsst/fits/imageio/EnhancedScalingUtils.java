@@ -3,6 +3,8 @@ package org.lsst.fits.imageio;
 import java.nio.FloatBuffer;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.lsst.fits.imageio.cmap.RGBColorMap;
 
 /**
@@ -15,6 +17,8 @@ import org.lsst.fits.imageio.cmap.RGBColorMap;
  */
 public class EnhancedScalingUtils {
 
+    private static final Logger LOG = Logger.getLogger(EnhancedScalingUtils.class.getName());
+
     private final static int MAX_BINS = 100000;
 
     private float min;
@@ -25,6 +29,7 @@ public class EnhancedScalingUtils {
     private final int[] rgb;
 
     EnhancedScalingUtils(FloatBuffer data, RGBColorMap colorMap) {
+        data.rewind();
         histogram = fillHistogram(MAX_BINS, data);
         rgb = computeCDF(histogram, nEntries, colorMap);
     }
@@ -123,7 +128,12 @@ public class EnhancedScalingUtils {
     }
 
     int getRGB(float value) {
-        return rgb[binFor(min, binSize, value)];
+        int bin = binFor(min, binSize, value);
+        if (bin<0 || bin>=rgb.length) {
+            LOG.log(Level.SEVERE, "Invalid bin {0} value={1} min={2} max={3} binSize={4}", new Object[]{bin, value, min, max, binSize});
+            bin = 0;
+        }
+        return rgb[bin];
     }
 
     @Override
