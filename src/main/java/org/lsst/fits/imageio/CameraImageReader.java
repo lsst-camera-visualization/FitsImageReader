@@ -39,7 +39,7 @@ public class CameraImageReader extends ImageReader {
 
     private static final Logger LOG = Logger.getLogger(CameraImageReader.class.getName());
     private static final CachingReader READER = new CachingReader();
-    public static final ImageTypeSpecifier IMAGE_TYPE = ImageTypeSpecifier.createFromBufferedImageType(BufferedImage.TYPE_INT_RGB);
+    public static final ImageTypeSpecifier IMAGE_TYPE = ImageTypeSpecifier.createFromBufferedImageType(BufferedImage.TYPE_INT_ARGB);
     public static final RGBColorMap DEFAULT_COLOR_MAP = new SAOColorMap(256, "grey.sao");
     public static final RGBColorMap NULL_COLOR_MAP = new SAOColorMap(256, "null.sao");
     public static final BiasCorrection DEFAULT_BIAS_CORRECTION = new NullBiasCorrection();

@@ -447,7 +447,7 @@ public class CachingReader {
             int p = datasec.x + y * segment.getNAxis1();
             for (int x = datasec.x; x < datasec.width + datasec.x; x++) {
                 float f = floatBuffer.get(p);
-                db.setElem(p, esu.getRGB(f));
+                db.setElem(p, esu.getRGB(f) | 0xff000000);
                 p++;
             }
         }
@@ -508,7 +508,7 @@ public class CachingReader {
 //                if (bin > max) {
 //                    LOG.log(Level.WARNING, "Bin greater than max {0} {1} {2} {3} {4}", new Object[]{segment, x, y, bin, max});                    
 //                }
-                int rgb = no_map ? bin << 6 : cdf[bin]; 
+                int rgb = no_map ? bin << 6 : cdf[bin] | 0xff000000; 
                 db.setElem(p, rgb);
                 p++;
             }
