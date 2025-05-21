@@ -5,19 +5,16 @@ import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.nio.channels.AsynchronousFileChannel;
-import java.nio.channels.CompletionHandler;
-import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import nom.tam.fits.FitsException;
@@ -28,7 +25,8 @@ import nom.tam.fits.compression.algorithm.gzip2.GZip2Compressor;
 import nom.tam.fits.compression.algorithm.rice.RiceCompressOption;
 import nom.tam.fits.compression.algorithm.rice.RiceCompressor.IntRiceCompressor;
 import nom.tam.fits.header.Standard;
-import nom.tam.util.BufferedFile;
+import nom.tam.util.FitsFile;
+import org.lsst.fits.imageio.s3.S3Utils;
 
 /**
  * Represents one segment (amplifier) of a FITS file
@@ -38,14 +36,15 @@ import nom.tam.util.BufferedFile;
 public class Segment {
 
     private static final Pattern DATASET_PATTERN = Pattern.compile("\\[(\\d+):(\\d+),(\\d+):(\\d+)\\]");
+    private static final Logger LOG = Logger.getLogger(Segment.class.getName());
 
-    private final File file;
-    private final long seekPosition;
+    private final String file;
+    private long seekPosition;
     private final Rectangle2D.Double wcs;
     private final AffineTransform wcsTranslation;
     private Rectangle datasec;
-    private final int nAxis1;
-    private final int nAxis2;
+    private int nAxis1;
+    private int nAxis2;
     private double crval1;
     private double crval2;
     private double pc1_1;
@@ -53,63 +52,31 @@ public class Segment {
     private double pc1_2;
     private double pc2_1;
     private final char wcsLetter;
-    private final int rawDataLength;
-    private final boolean isCompressed;
-//    private final BasicHDU<?> compressedImageHDU;
-//    private final int ccdX;
-//    private final int ccdY;
-    private int channel;
-//    private BufferedFile bf;
-    // Used only with compressed data
-    private final int cAxis1;
-    private final int cAxis2;
-    private final int zTile1;
-    private final int zTile2;
+    private int rawDataLength;
+    private boolean isCompressed;
+    private int cAxis1;
+    private int cAxis2;
     private final String segmentName;
     private final String raftBay;
     private final String ccdSlot;
-    private final String compressionType;
-    private final int bitpix;
+    private String compressionType;
+    private int bitpix;
+    private long fileSize;
+    private final int hduNumber;
 
-    public Segment(Header header, File file, BufferedFile bf, String raftBay, String ccdSlot, char wcsLetter, Map<String, Object> wcsOverride) throws IOException, FitsException {
+    public Segment(Header header, int hduNumber, long fileSize, String file, FitsFile ff, String raftBay, String ccdSlot, char wcsLetter, Map<String, Object> wcsOverride) throws IOException, FitsException {
         this.file = file;
-        this.seekPosition = bf.getFilePointer();
+        this.hduNumber = hduNumber;
+        this.fileSize = fileSize;
+        this.seekPosition = ff.getFilePointer();
         this.wcsLetter = wcsLetter;
         this.raftBay = raftBay;
         this.ccdSlot = ccdSlot;
-        isCompressed = header.getBooleanValue("ZIMAGE");
-        segmentName = header.getStringValue("EXTNAME");
-        if (isCompressed) {
-            bitpix = header.getIntValue("ZBITPIX");
-            compressionType = header.getStringValue("ZCMPTYPE");
-            // Note, nom,tam.fits has support for many/all compression types, 
-            // but performance for the way we are trying to use it leaves much
-            // to be desired. The "deferred data reading" used by nom.tam.fits also
-            // has issues with requiring files to remain open to be used later.
-            // For now we only support the GZIP_2 type used for camera data.
-            if (!"RICE_1".equals(compressionType) && !"GZIP_2".equals(header.getStringValue("ZCMPTYPE"))) {
-                throw new FitsException("Unsupported compression type: " + compressionType);
-            }
-            nAxis1 = header.getIntValue("ZNAXIS1"); // 576
-            nAxis2 = header.getIntValue("ZNAXIS2"); // 2048       
-            rawDataLength = header.getIntValue(Standard.NAXIS1) * header.getIntValue(Standard.NAXIS2) + header.getIntValue("PCOUNT");
-            // There give the size of the binary table giving the offsets into the compressed data
-            cAxis1 = header.getIntValue(Standard.NAXIS1); // 8
-            cAxis2 = header.getIntValue(Standard.NAXIS2); // 2048
-            // These give the size of the compressed "tiles"
-            zTile1 = header.getIntValue("ZTILE1"); // 576
-            zTile2 = header.getIntValue("ZTILE2"); // 1  
-        } else {
-            bitpix = header.getIntValue("BITPIX");
-            nAxis1 = header.getIntValue(Standard.NAXIS1);
-            nAxis2 = header.getIntValue(Standard.NAXIS2);
-            rawDataLength = nAxis1 * nAxis2 * 4;
-            cAxis1 = cAxis2 = zTile1 = zTile2 = 0;
-            compressionType = null;
-        }
+        this.segmentName = header.getStringValue("EXTNAME");
+        extractheaderInfo(header);
         // Skip the data (for now)
         int pad = FitsUtil.padding(rawDataLength);
-        bf.skip(rawDataLength + pad);
+        ff.skip(rawDataLength + pad);
 
         if (wcsOverride != null) {
             String datasecString = wcsOverride.get("DATASEC").toString();
@@ -120,7 +87,6 @@ public class Segment {
             pc2_1 = ((Number) wcsOverride.get("PC2_1" + wcsLetter)).doubleValue();
             crval1 = ((Number) wcsOverride.get("CRVAL1" + wcsLetter)).doubleValue();
             crval2 = ((Number) wcsOverride.get("CRVAL2" + wcsLetter)).doubleValue();
-            channel = header.getIntValue("CHANNEL");
         } else {
             String datasecString = header.getStringValue("DATASEC");
             if (datasecString == null) {
@@ -139,7 +105,6 @@ public class Segment {
             pc2_1 = header.getDoubleValue("PC2_1" + localWcsLetter);
             crval1 = header.getDoubleValue("CRVAL1" + localWcsLetter);
             crval2 = header.getDoubleValue("CRVAL2" + localWcsLetter);
-            channel = header.getIntValue("CHANNEL");
             if (wcsLetter == 'Q' && raftBay != null) {
                 int raftX = Integer.parseInt(raftBay.substring(1,2));
                 int raftY = Integer.parseInt(raftBay.substring(2,3));
@@ -169,6 +134,37 @@ public class Segment {
         wcs = new Rectangle2D.Double(x, y, width, height);
     }
 
+    private int extractheaderInfo(Header header) throws FitsException {
+        this.isCompressed = header.getBooleanValue("ZIMAGE");
+        if (isCompressed) {
+            bitpix = header.getIntValue("ZBITPIX");
+            compressionType = header.getStringValue("ZCMPTYPE");
+            // Note, nom,tam.fits has support for many/all compression types,
+            // but performance for the way we are trying to use it leaves much
+            // to be desired. The "deferred data reading" used by nom.tam.fits also
+            // has issues with requiring files to remain open to be used later.
+            // For now we only support the GZIP_2 type used for camera data.
+            if (!"RICE_1".equals(compressionType) && !"GZIP_2".equals(header.getStringValue("ZCMPTYPE"))) {
+                throw new FitsException("Unsupported compression type: " + compressionType);
+            }
+            nAxis1 = header.getIntValue("ZNAXIS1"); // 576
+            nAxis2 = header.getIntValue("ZNAXIS2"); // 2048
+            rawDataLength = header.getIntValue(Standard.NAXIS1) * header.getIntValue(Standard.NAXIS2) + header.getIntValue("PCOUNT");
+            // There give the size of the binary table giving the offsets into the compressed data
+            cAxis1 = header.getIntValue(Standard.NAXIS1); // 8
+            cAxis2 = header.getIntValue(Standard.NAXIS2); // 2048
+            // These give the size of the compressed "tiles"
+        } else {
+            bitpix = header.getIntValue("BITPIX");
+            nAxis1 = header.getIntValue(Standard.NAXIS1);
+            nAxis2 = header.getIntValue(Standard.NAXIS2);
+            rawDataLength = nAxis1 * nAxis2 * 4;
+            cAxis1 = cAxis2 = 0;
+            compressionType = null;
+        }
+        return rawDataLength;
+    }
+
     private Rectangle computeDatasec(String datasecString) throws IOException, NumberFormatException {
         Matcher matcher = DATASET_PATTERN.matcher(datasecString);
         if (!matcher.matches()) {
@@ -187,10 +183,6 @@ public class Segment {
 
     public int getDataSize() {
         return rawDataLength;
-    }
-
-    public File getFile() {
-        return file;
     }
 
 //    // Data in the compressed byte array is stored with the bytes shuffled, this routine unshuffles them
@@ -305,53 +297,85 @@ public class Segment {
         if (isCompressed) {
             if ("GZIP_2".equals(compressionType)) {
                 switch (bitpix) {
-                    case 32:
+                    case 32 -> {
                         return futureByteBuffer.thenApply((bb) -> decodeGZIP2CompressedData(bb)).thenApply((ib) -> new RawData(this, ib));
-                    case -32:
+                    }
+                    case -32 -> {
                         return futureByteBuffer.thenApply((bb) -> decodeGZIP2FloatCompressedData(bb)).thenApply((fb) -> new RawData(this, fb));
-                    default:
-                        throw new RuntimeException("Unsupported bitpix: "+bitpix);
+                    }
+                    default -> throw new RuntimeException("Unsupported bitpix: "+bitpix);
                 }
             } else {
                 return futureByteBuffer.thenApply((bb) -> decodeRICECompressedData(bb)).thenApply((ib) -> new RawData(this, ib));
             }
         } else {
-            return futureByteBuffer.thenApply((bb) -> new RawData(this, bb.asIntBuffer()));
+            switch (bitpix) {
+                case 32:
+                    return futureByteBuffer.thenApply((bb) -> new RawData(this, bb.asIntBuffer()));
+                case -32:
+                    return futureByteBuffer.thenApply((bb) -> new RawData(this, bb.asFloatBuffer()));
+                default:
+                    throw new RuntimeException("Unsupported bitpix: "+bitpix);
+            }
         }
     }
 
     private CompletableFuture<ByteBuffer> readByteBufferAsync() {
-        CompletableFuture<ByteBuffer> result = new CompletableFuture<>();
-        try {
-            AsynchronousFileChannel asyncChannel = AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
-            ByteBuffer bb = ByteBuffer.allocateDirect(rawDataLength);
-            bb.order(ByteOrder.BIG_ENDIAN);
-            asyncChannel.read(bb, seekPosition, result, new CompletionHandler<Integer, CompletableFuture<ByteBuffer>>() {
-                @Override
-                public void completed(Integer len, CompletableFuture<ByteBuffer> future) {
-                    try {
-                        asyncChannel.close();
-                    } catch (IOException ex) {
-                        future.completeExceptionally(ex);
-                    }
-                    bb.flip();
-                    future.complete(bb);
-                }
-
-                @Override
-                public void failed(Throwable x, CompletableFuture<ByteBuffer> future) {
-                    try {
-                        asyncChannel.close();
-                    } catch (IOException ex) {
-                        // We already have an IO exception in progress, so ignore this additional one
-                    }
-                    future.completeExceptionally(x);
-                }
-            });
-        } catch (IOException x) {
-            result.completeExceptionally(x);
-        }
-        return result;
+//        CompletableFuture<ByteBuffer> result = new CompletableFuture<>();
+//        try {
+//            // This re-opens the file, which may have changed since we originally read it (e.g. it may be been compressed)
+//            // Any decision about whether this file is compressed or not, needs to be remade now. Also any offset we stored
+//            // into the full file may now be invalid.
+//            AsynchronousFileChannel asyncChannel = AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);  
+//            LOG.log(Level.INFO, "Checking file length modified {0} {1}", new Object[]{fileSize, file.length()});
+//            if (fileSize != file.length()) {
+//                LOG.log(Level.WARNING, "File {0} modified, taking evasive maneuvers", file);
+//                try (BufferedFile bf = new BufferedFile(file, "r")) {
+//                    @SuppressWarnings("UnusedAssignment")
+//                    Header header = new Header(bf); // Skip primary header
+//                    for (int i = 1; i < hduNumber; i++) {
+//                        header = new Header(bf);
+//                        bf.seek(bf.getFilePointer() + header.getDataSize());
+//                    }
+//                    this.fileSize  = file.length();
+//                    header = new Header(bf);
+//                    this.seekPosition = bf.getFilePointer();
+//                    // SanityCheck
+//                    if (!this.segmentName.equals(header.getStringValue("EXTNAME"))) {
+//                        throw new IOException("Segment name has changed, was "+this.segmentName+" now "+header.getStringValue("EXTNAME"));
+//                    }
+//                    extractheaderInfo(header);
+//                } 
+//            }
+//            ByteBuffer bb = ByteBuffer.allocateDirect(rawDataLength);
+//            bb.order(ByteOrder.BIG_ENDIAN);
+//            asyncChannel.read(bb, seekPosition, result, new CompletionHandler<Integer, CompletableFuture<ByteBuffer>>() {
+//                @Override
+//                public void completed(Integer len, CompletableFuture<ByteBuffer> future) {
+//                    try {
+//                        asyncChannel.close();
+//                    } catch (IOException ex) {
+//                        future.completeExceptionally(ex);
+//                    }
+//                    bb.flip();
+//                    future.complete(bb);
+//                }
+//
+//                @Override
+//                public void failed(Throwable x, CompletableFuture<ByteBuffer> future) {
+//                    try {
+//                        asyncChannel.close();
+//                    } catch (IOException ex) {
+//                        // We already have an IO exception in progress, so ignore this additional one
+//                    }
+//                    future.completeExceptionally(x);
+//                }
+//            });
+//        } catch (IOException | FitsException x) {
+//            result.completeExceptionally(x);
+//        }
+//        return result;
+        return S3Utils.readByteBufferAsync(file, seekPosition, rawDataLength, fileSize);
     }
 
     public int getNAxis1() {
@@ -409,7 +433,7 @@ public class Segment {
     public int hashCode() {
         int hash = 5;
         hash = 71 * hash + Objects.hashCode(this.file);
-        hash = 71 * hash + (int) (this.seekPosition ^ (this.seekPosition >>> 32));
+        hash = 71 * hash + this.hduNumber;
         hash = 71 * hash + Objects.hashCode(this.wcsLetter);
         return hash;
     }
@@ -426,7 +450,7 @@ public class Segment {
             return false;
         }
         final Segment other = (Segment) obj;
-        if (this.seekPosition != other.seekPosition) {
+        if (this.hduNumber != other.hduNumber) {
             return false;
         }
         if (!Objects.equals(this.wcsLetter, other.wcsLetter)) {

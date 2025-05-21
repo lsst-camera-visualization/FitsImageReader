@@ -1,13 +1,12 @@
 package org.lsst.fits.imageio.bias;
 
 import java.awt.Rectangle;
-import java.io.File;
 import java.io.IOException;
 import java.nio.IntBuffer;
 import nom.tam.fits.FitsException;
 import nom.tam.fits.Header;
 import nom.tam.fits.TruncatedFileException;
-import nom.tam.util.BufferedFile;
+import nom.tam.util.FitsFile;
 import org.lsst.fits.imageio.Segment;
 
 /**
@@ -77,8 +76,8 @@ public class SerialParallelBiasSub implements BiasCorrection {
     }
 
     public static void main(String[] args) throws IOException, TruncatedFileException, FitsException {
-        File file = new File("/home/tonyj/Data/pretty/20_Flat_screen_0000_20190322172301.fits");
-        BufferedFile bf = new BufferedFile(file, "r");
+        String file = "/home/tonyj/Data/pretty/20_Flat_screen_0000_20190322172301.fits";
+        FitsFile bf = new FitsFile(file, "r");
         @SuppressWarnings("UnusedAssignment")
         Header header = new Header(bf); // Skip primary header
         for (int i = 0; i < 11; i++) {
@@ -86,7 +85,7 @@ public class SerialParallelBiasSub implements BiasCorrection {
             bf.seek(bf.getFilePointer() + header.getDataSize());
         }
         header = new Header(bf);
-        Segment segment = new Segment(header, file, bf, "R22", "S20", '4', null);
+        Segment segment = new Segment(header, 12, file.length(), file, bf, "R22", "S20", '4', null);
         IntBuffer intBuffer = (IntBuffer) segment.readRawDataAsync(null).join().getBuffer();
 
         BiasCorrection bc = new SerialParallelBiasSub();
