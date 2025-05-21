@@ -122,6 +122,12 @@ public class EnhancedScalingUtils {
         return nEntries;
     }
 
+    int getPseudoRGB(float value) {
+        // Return a pseudo 18-bit rgb following Jeff's conventions
+        int bin = (int) Math.floor((value - min) / binSize / histogram.length * (2 ^ 18));
+        return bin << 6;
+    }
+    
     int getRGB(float value) {
         return rgb[binFor(min, binSize, value)];
     }

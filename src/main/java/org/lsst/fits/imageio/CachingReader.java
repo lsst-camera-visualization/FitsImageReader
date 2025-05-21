@@ -119,10 +119,11 @@ public class CachingReader {
                     return rawDataCache.get(key.segment).thenApply(rawData -> {
                         return biasCorrectionCache.get(new SegmentAndBiasCorrection(key.segment, key.biasCorrection)).thenApply(factors -> {
                             return Timed.execute(() -> {
+                                boolean usePseudoRGB = key.cmap.equals(CameraImageReader.NULL_COLOR_MAP); 
                                 if (rawData.getBuffer() instanceof IntBuffer) {
-                                    return createBufferedImage((RawData<IntBuffer>) rawData, factors, key.counts, key.cmap);
+                                    return createBufferedImage((RawData<IntBuffer>) rawData, factors, key.counts, usePseudoRGB);
                                 } else {
-                                    return createBufferedImage((RawData<FloatBuffer>) rawData);
+                                    return createBufferedImage((RawData<FloatBuffer>) rawData, usePseudoRGB);
                                 }
                             }, "Loading buffered image for segment %s took %dms", key.segment);
                         }).join();
@@ -432,7 +433,7 @@ public class CachingReader {
         return result;
     }
 
-    private static BufferedImage createBufferedImage(RawData<FloatBuffer> rawData) {
+    private static BufferedImage createBufferedImage(RawData<FloatBuffer> rawData, boolean usePseudoRGB) {
         FloatBuffer floatBuffer = rawData.getBuffer();
 
         EnhancedScalingUtils esu = new EnhancedScalingUtils(floatBuffer, CameraImageReader.DEFAULT_COLOR_MAP);
@@ -447,14 +448,15 @@ public class CachingReader {
             int p = datasec.x + y * segment.getNAxis1();
             for (int x = datasec.x; x < datasec.width + datasec.x; x++) {
                 float f = floatBuffer.get(p);
-                db.setElem(p, esu.getRGB(f));
+                final int rgb = usePseudoRGB ? esu.getPseudoRGB(f) : esu.getRGB(f);
+                db.setElem(p, rgb);
                 p++;
             }
         }
         return image;
     }
 
-    private static BufferedImage createBufferedImage(RawData<IntBuffer> rawData, CorrectionFactors factors, long[] globalScale, RGBColorMap cmap) {
+    private static BufferedImage createBufferedImage(RawData<IntBuffer> rawData, CorrectionFactors factors, long[] globalScale, boolean usePseudoRGB) {
         IntBuffer intBuffer = rawData.getBuffer();
         Segment segment = rawData.getSegment();
         Rectangle datasec = segment.getDataSec();
@@ -487,16 +489,15 @@ public class CachingReader {
 //        graphics.fillRect(datasec.x + datasec.width, 0, segment.getNAxis1() - datasec.x - datasec.width, segment.getNAxis2());
 //        graphics.setColor(Color.BLUE);
 //        graphics.fillRect(datasec.x, datasec.y + datasec.height, datasec.width, segment.getNAxis2());
-        copyAndScaleData(datasec, segment, cdf, intBuffer, factors, db, max, cmap);
+        copyAndScaleData(datasec, segment, cdf, intBuffer, factors, db, max, usePseudoRGB);
         return image;
     }
 
-    private static void copyAndScaleData(Rectangle datasec, Segment segment, int[] cdf, IntBuffer intBuffer, BiasCorrection.CorrectionFactors factors, DataBuffer db, int max, RGBColorMap cmap) {
+    private static void copyAndScaleData(Rectangle datasec, Segment segment, int[] cdf, IntBuffer intBuffer, BiasCorrection.CorrectionFactors factors, DataBuffer db, int max, boolean usePseudoRGB) {
         //LOG.log(Level.WARNING, "copyAndScaleData called 1.7.1");
         //if (cmap.equals(CameraImageReader.NULL_COLOR_MAP)) LOG.log(Level.INFO, "copyAndScaleData null color map");
         //else if (cmap.equals(CameraImageReader.DEFAULT_COLOR_MAP)) LOG.log(Level.INFO, "copyAndScaleData default color map");
         //else LOG.log(Level.INFO, "copyAndScaleData other color map");
-        boolean no_map = cmap.equals(CameraImageReader.NULL_COLOR_MAP);
         for (int y = datasec.y; y < datasec.height + datasec.y; y++) {
             int p = datasec.x + y * segment.getNAxis1();
             for (int x = datasec.x; x < datasec.width + datasec.x; x++) {
@@ -508,7 +509,7 @@ public class CachingReader {
 //                if (bin > max) {
 //                    LOG.log(Level.WARNING, "Bin greater than max {0} {1} {2} {3} {4}", new Object[]{segment, x, y, bin, max});                    
 //                }
-                int rgb = no_map ? bin << 6 : cdf[bin]; 
+                int rgb = usePseudoRGB ? bin << 6 : cdf[bin]; 
                 db.setElem(p, rgb);
                 p++;
             }
