@@ -129,7 +129,7 @@ public class EnhancedScalingUtils {
 
     int getPseudoRGB(float value) {
         // Return a pseudo 18-bit rgb following Jeff's conventions
-        int bin = (int) Math.floor((value - min) / binSize / histogram.length * (2 ^ 18));
+        int bin = (int) Math.floor((value - min) / binSize / histogram.length * (1 << 18));
         return bin << 6;
     }
     
