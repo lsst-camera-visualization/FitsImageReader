@@ -16,6 +16,8 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import nom.tam.util.RandomAccessFileIO;
 
 /**
@@ -23,6 +25,8 @@ import nom.tam.util.RandomAccessFileIO;
  * @author tonyj
  */
 public class RandomAccessObject implements RandomAccessFileIO {
+
+    private static final Logger LOG = Logger.getLogger(S3Utils.class.getName());
 
     private final String object;
     private final String bucket;
@@ -83,7 +87,7 @@ public class RandomAccessObject implements RandomAccessFileIO {
 
     @Override
     public void position(long n) throws IOException {
-        System.out.printf("set position %d\n", n);        
+        LOG.log(Level.FINE, "set position {0}", n);        
         this.position = n;
     }
 
@@ -99,7 +103,7 @@ public class RandomAccessObject implements RandomAccessFileIO {
 
     @Override
     public int read(byte[] b, int from, int length) throws IOException {
-        System.out.printf("read from %d length %d\n", position+from, length);
+        LOG.log(Level.FINE, "read from {0} length {1}", new Object[]{position+from, length});
         try {
             CompletableFuture<GetObjectResponse> stream = client.getObject(
                     GetObjectArgs.builder()
@@ -124,6 +128,7 @@ public class RandomAccessObject implements RandomAccessFileIO {
     }
     
     CompletableFuture<GetObjectResponse> asyncRead(long position, long length) throws InsufficientDataException, InternalException, InvalidKeyException, IOException, NoSuchAlgorithmException, XmlParserException {
+        LOG.log(Level.FINE, "async read from {0} length {1}", new Object[]{position, length});
         return client.getObject(
                     GetObjectArgs.builder()
                             .bucket(bucket)

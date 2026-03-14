@@ -321,6 +321,9 @@ public class Segment {
     }
 
     private CompletableFuture<ByteBuffer> readByteBufferAsync() {
+        // The following code is required to guard against file being compressed after it
+        // was opened, but has been commented out because it is not compatible with thew new 
+        // code supporting s3. This needs to be fixed.
 //        CompletableFuture<ByteBuffer> result = new CompletableFuture<>();
 //        try {
 //            // This re-opens the file, which may have changed since we originally read it (e.g. it may be been compressed)

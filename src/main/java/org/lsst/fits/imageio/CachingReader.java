@@ -415,9 +415,16 @@ public class CachingReader {
                             naxis1 = header.getIntValue("NAXIS1");
                             naxis2 = header.getIntValue("NAXIS2");
                         }
-                        // This does not work for SW0 and SW1
-                        int ccdx = ccdSlot.charAt(1) - '0';
-                        int ccdy = ccdSlot.charAt(2) - '0';
+                        final char charAt = ccdSlot.charAt(1);
+                        int ccdx, ccdy;
+                        if (charAt == 'W') {
+                            ccdx = ccdSlot.charAt(2) - '0';
+                            ccdy = 0;
+                        } else {
+                            ccdx = charAt - '0';
+                            ccdy = ccdSlot.charAt(2) - '0';                            
+                        }
+
                         dmWCSOverride.put("DATASEC", String.format("[1:%d,1:%d]", naxis1, naxis2));
                         dmWCSOverride.put("PC1_1D", 1.0);
                         dmWCSOverride.put("PC1_2D", 0.0);
