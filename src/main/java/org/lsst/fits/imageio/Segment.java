@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -321,63 +323,35 @@ public class Segment {
     }
 
     private CompletableFuture<ByteBuffer> readByteBufferAsync() {
-        // The following code is required to guard against file being compressed after it
-        // was opened, but has been commented out because it is not compatible with thew new 
-        // code supporting s3. This needs to be fixed.
-//        CompletableFuture<ByteBuffer> result = new CompletableFuture<>();
-//        try {
-//            // This re-opens the file, which may have changed since we originally read it (e.g. it may be been compressed)
-//            // Any decision about whether this file is compressed or not, needs to be remade now. Also any offset we stored
-//            // into the full file may now be invalid.
-//            AsynchronousFileChannel asyncChannel = AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);  
-//            LOG.log(Level.INFO, "Checking file length modified {0} {1}", new Object[]{fileSize, file.length()});
-//            if (fileSize != file.length()) {
-//                LOG.log(Level.WARNING, "File {0} modified, taking evasive maneuvers", file);
-//                try (BufferedFile bf = new BufferedFile(file, "r")) {
-//                    @SuppressWarnings("UnusedAssignment")
-//                    Header header = new Header(bf); // Skip primary header
-//                    for (int i = 1; i < hduNumber; i++) {
-//                        header = new Header(bf);
-//                        bf.seek(bf.getFilePointer() + header.getDataSize());
-//                    }
-//                    this.fileSize  = file.length();
-//                    header = new Header(bf);
-//                    this.seekPosition = bf.getFilePointer();
-//                    // SanityCheck
-//                    if (!this.segmentName.equals(header.getStringValue("EXTNAME"))) {
-//                        throw new IOException("Segment name has changed, was "+this.segmentName+" now "+header.getStringValue("EXTNAME"));
-//                    }
-//                    extractheaderInfo(header);
-//                } 
-//            }
-//            ByteBuffer bb = ByteBuffer.allocateDirect(rawDataLength);
-//            bb.order(ByteOrder.BIG_ENDIAN);
-//            asyncChannel.read(bb, seekPosition, result, new CompletionHandler<Integer, CompletableFuture<ByteBuffer>>() {
-//                @Override
-//                public void completed(Integer len, CompletableFuture<ByteBuffer> future) {
-//                    try {
-//                        asyncChannel.close();
-//                    } catch (IOException ex) {
-//                        future.completeExceptionally(ex);
-//                    }
-//                    bb.flip();
-//                    future.complete(bb);
-//                }
-//
-//                @Override
-//                public void failed(Throwable x, CompletableFuture<ByteBuffer> future) {
-//                    try {
-//                        asyncChannel.close();
-//                    } catch (IOException ex) {
-//                        // We already have an IO exception in progress, so ignore this additional one
-//                    }
-//                    future.completeExceptionally(x);
-//                }
-//            });
-//        } catch (IOException | FitsException x) {
-//            result.completeExceptionally(x);
-//        }
-//        return result;
+        if (!file.startsWith("s3:")) {
+            // The file may have been compressed after it was initially read (e.g. by an
+            // external archiving process). If so, any stored seek position and data length
+            // are invalid and the header must be re-read to obtain correct offsets.
+            try {
+                long currentSize = Files.size(Path.of(file));
+                if (currentSize != fileSize) {
+                    LOG.log(Level.WARNING, "File {0} modified, re-reading headers", file);
+                    try (FitsFile ff = S3Utils.openFile(file)) {
+                        @SuppressWarnings("UnusedAssignment")
+                        Header header = new Header(ff); // Skip primary header
+                        for (int i = 1; i < hduNumber; i++) {
+                            header = new Header(ff);
+                            ff.seek(ff.getFilePointer() + header.getDataSize());
+                        }
+                        this.fileSize = currentSize;
+                        header = new Header(ff);
+                        this.seekPosition = ff.getFilePointer();
+                        if (!this.segmentName.equals(header.getStringValue("EXTNAME"))) {
+                            throw new IOException("Segment name changed: was " + segmentName
+                                    + " now " + header.getStringValue("EXTNAME"));
+                        }
+                        extractheaderInfo(header);
+                    }
+                }
+            } catch (IOException | FitsException x) {
+                return CompletableFuture.failedFuture(x);
+            }
+        }
         return S3Utils.readByteBufferAsync(file, seekPosition, rawDataLength, fileSize);
     }
 
